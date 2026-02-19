@@ -1,40 +1,38 @@
 # Pathfinding Framework
 
-Clean, deterministic reconstruction of the original multi-agent pathfinding project.
+Clean LLM-first reconstruction of the original multi-agent pathfinding system.
 
-This version keeps the core ideas from `D:\reconstruction\Framework\pathfinding_framework.py`:
+This version keeps the core architecture from `D:\reconstruction\Framework\pathfinding_framework.py`:
 
-- graph partitioning into subgraphs
-- metagraph memory (portal nodes, local adjacency, inter-subgraph edges)
-- subgraph-level planning
-- per-segment solver dispatch records
-- final path combination
-- path validation and CLI execution
+- Master orchestration with tool-calling
+- Solver agent for local subgraph path search
+- Combiner agent for final path stitching
+- Leiden/greedy graph partitioning + metagraph memory
+- Path validation against the real graph
 
-It intentionally removes the old LLM orchestration complexity and replaces it with explicit, testable Python logic.
+The focus is reducing overlap and dead code while preserving the LLM workflow.
 
-## Key Features
+## Architecture
 
-- deterministic hierarchical pathfinding pipeline
-- optional Leiden partitioning (`igraph` + `leidenalg`) with greedy modularity fallback
-- JSON metagraph save/load
-- compatibility with dataset pickle files used by the legacy framework
-- end-to-end CLI
+- `Master` (LLM): decides which tools to call and in what order.
+- `dispatch_solver` (LLM): solves one subgraph step at a time.
+- `get_subgraph_relationships`: exposes portal transitions from last dispatched subgraph.
+- `dispatch_combiner` (LLM): merges worker segments into one path.
 
 ## Project Layout
 
 ```text
 pathfinding_framework/
   src/pathfinding_framework/
-    framework.py       # Main API: initialize, load/save metagraph, solve
-    partitioning.py    # Graph partition + metagraph construction
-    memory.py          # Runtime graph memory operations
-    solver.py          # Deterministic local solver dispatch
-    combiner.py        # Path stitching
-    planner.py         # Subgraph route planning
-    validation.py      # Final path checks
-    datasets.py        # Legacy dataset loading helpers
-    cli.py             # Command line entrypoint
+    framework.py       # Master loop and tool execution
+    solver.py          # LLM solver agent
+    combiner.py        # LLM combiner agent
+    llm_client.py      # OpenAI client wrapper + usage tracking
+    memory.py          # Metagraph memory store
+    partitioning.py    # Leiden/greedy partitioning
+    validation.py      # Path validation
+    datasets.py        # Dataset loading helpers
+    cli.py             # CLI entrypoint
 ```
 
 ## Install
@@ -49,41 +47,30 @@ Optional Leiden dependencies:
 pip install -e .[leiden]
 ```
 
-## Python Usage
+## API Key
 
-```python
-import pickle
-from pathfinding_framework import PathfindingFramework
+Set your key in environment:
 
-with open("dataset/Distance_100.pkl", "rb") as f:
-    problems = pickle.load(f)
-
-problem = problems[0]
-graph = problem["graph"]
-source = graph.nodes[problem["source"]].get("name", str(problem["source"]))
-target = graph.nodes[problem["target"]].get("name", str(problem["target"]))
-
-framework = PathfindingFramework(verbose=True)
-framework.initialize_graph(graph, resolution=3.5, method="auto")
-
-result = framework.solve(
-    source=source,
-    target=target,
-    graph=graph,
-    expected_distance=problem.get("exact_answer"),
-)
-
-print(result["status"], result["final_path"])
+```bash
+set OPENAI_API_KEY=your_key_here
 ```
 
-## CLI
+or pass CLI flag:
+
+```bash
+pfw-run --api-key your_key_here ...
+```
+
+## CLI Usage
 
 ```bash
 pfw-run --dataset D:\reconstruction\Framework\dataset\Distance_100.pkl --problem 0
 ```
 
-Main options:
+Useful options:
 
+- `--model gpt-4.1-2025-04-14`
+- `--max-turns 30`
 - `--partition-method auto|leiden|greedy`
 - `--resolution 3.5`
 - `--save-metagraph <path>`
@@ -91,13 +78,33 @@ Main options:
 - `--no-preprocess`
 - `--quiet`
 
-## Design Notes
+## Python Usage
 
-- Node names are canonical runtime IDs. Duplicate node names are rejected at initialization.
-- The solver works per subgraph route and selects portal transitions deterministically.
-- If hierarchical solving fails but full graph is available, the framework falls back to global shortest path and reports `success_fallback`.
+```python
+import pickle
+from pathfinding_framework import PathfindingFramework
 
-## Scope of Reconstruction
+with open(r"D:\reconstruction\Framework\dataset\Distance_100.pkl", "rb") as f:
+    problems = pickle.load(f)
 
-This repository is a structural and code-level reconstruction of the framework itself (not a file-for-file copy of the legacy codebase).  
-The architecture was redesigned for readability, maintainability, and deterministic behavior.
+problem = problems[0]
+graph = problem["graph"]
+source = graph.nodes[problem["source"]].get("name", str(problem["source"]))
+target = graph.nodes[problem["target"]].get("name", str(problem["target"]))
+
+framework = PathfindingFramework(
+    api_key=None,  # uses OPENAI_API_KEY if set
+    model="gpt-4.1-2025-04-14",
+    max_turns=30,
+    verbose=True,
+)
+framework.initialize_graph(graph, method="auto", resolution=3.5)
+
+result = framework.solve(
+    source=source,
+    target=target,
+    graph=graph,
+    expected_distance=problem.get("exact_answer"),
+)
+print(result["status"], result["final_path"])
+```

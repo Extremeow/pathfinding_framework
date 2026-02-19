@@ -6,13 +6,17 @@ from typing import Optional
 
 from .datasets import load_problem_set, resolve_problem
 from .framework import PathfindingFramework
+from .llm_client import DEFAULT_MODEL
 from .partitioning import DEFAULT_RESOLUTION
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deterministic hierarchical pathfinding framework")
+    parser = argparse.ArgumentParser(description="LLM-based hierarchical pathfinding framework")
     parser.add_argument("--dataset", type=str, required=True, help="Path to dataset pickle file")
     parser.add_argument("--problem", type=int, default=0, help="Problem index to solve")
+    parser.add_argument("--api-key", type=str, help="OpenAI API key (optional if OPENAI_API_KEY is set)")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="OpenAI model for master/solver/combiner")
+    parser.add_argument("--max-turns", type=int, default=30, help="Maximum master turns")
     parser.add_argument(
         "--partition-method",
         type=str,
@@ -62,6 +66,15 @@ def _print_result(result: dict, expected_distance: Optional[int]) -> None:
         if validation.get("errors"):
             print(f"  errors: {validation['errors']}")
 
+    token_usage = result.get("token_usage") or {}
+    if token_usage:
+        print("\nToken usage:")
+        print(f"  calls: {token_usage.get('calls', 0)}")
+        print(f"  input_tokens: {token_usage.get('input_tokens', 0)}")
+        print(f"  output_tokens: {token_usage.get('output_tokens', 0)}")
+        print(f"  total_tokens: {token_usage.get('total_tokens', 0)}")
+        print(f"  est_cost_usd: {token_usage.get('cost', 0.0):.6f}")
+
     print(f"\nSolve time: {result.get('solve_time_seconds', 0.0):.3f}s")
     print("=" * 80)
 
@@ -76,7 +89,12 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     graph, source, target, expected_distance = resolve_problem(problems[args.problem])
 
-    framework = PathfindingFramework(verbose=not args.quiet)
+    framework = PathfindingFramework(
+        api_key=args.api_key,
+        model=args.model,
+        max_turns=args.max_turns,
+        verbose=not args.quiet,
+    )
 
     if args.load_metagraph:
         framework.load_graph_memory(args.load_metagraph)
@@ -90,12 +108,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             save_path=args.save_metagraph,
         )
 
-    result = framework.solve(
-        source=source,
-        target=target,
-        graph=graph,
-        expected_distance=expected_distance,
-    )
+    try:
+        result = framework.solve(
+            source=source,
+            target=target,
+            graph=graph,
+            expected_distance=expected_distance,
+        )
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        return 2
     _print_result(result, expected_distance)
 
-    return 0 if result["status"] in {"success", "success_fallback"} else 1
+    return 0 if result["status"] in {"success", "partial"} else 1

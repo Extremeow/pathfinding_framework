@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pathfinding-framework"
 version = "0.1.0"
-description = "Deterministic hierarchical pathfinding framework with metagraph memory."
+description = "LLM-based hierarchical pathfinding framework with metagraph memory."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Extremeow" }]
-dependencies = ["networkx>=3.2"]
+dependencies = ["networkx>=3.2", "openai>=1.40.0"]
 
 [project.optional-dependencies]
 leiden = ["igraph>=0.11", "leidenalg>=0.10"]
