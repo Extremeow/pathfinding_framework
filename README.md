@@ -20,7 +20,6 @@ It intentionally removes the old LLM orchestration complexity and replaces it wi
 - JSON metagraph save/load
 - compatibility with dataset pickle files used by the legacy framework
 - end-to-end CLI
-- pytest coverage for core flows
 
 ## Project Layout
 
@@ -36,7 +35,6 @@ pathfinding_framework/
     validation.py      # Final path checks
     datasets.py        # Legacy dataset loading helpers
     cli.py             # Command line entrypoint
-  tests/
 ```
 
 ## Install
@@ -98,12 +96,6 @@ Main options:
 - Node names are canonical runtime IDs. Duplicate node names are rejected at initialization.
 - The solver works per subgraph route and selects portal transitions deterministically.
 - If hierarchical solving fails but full graph is available, the framework falls back to global shortest path and reports `success_fallback`.
-
-## Testing
-
-```bash
-pytest
-```
 
 ## Scope of Reconstruction
 
