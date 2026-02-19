@@ -14,6 +14,8 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
+.coverage
+.ruff_cache/
 
 # Build / artifacts
 build/
@@ -22,3 +24,6 @@ dist/
 
 # Logs
 *.log
+pytest-cache-files-*/
+tmp*/
+tests/_tmp_metagraph.json
