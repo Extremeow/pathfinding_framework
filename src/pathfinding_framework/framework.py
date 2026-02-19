@@ -27,6 +27,7 @@ Available tools:
 - dispatch_solver: run a local LLM solver in one subgraph.
 - get_subgraph_relationships: get portal transitions from last dispatched subgraph to a target subgraph.
 - dispatch_combiner: combine worker paths into one final path.
+- update_plan: update the persisted plan text for upcoming turns.
 
 Execution policy:
 1) First call graph_extract on the source subgraph.
@@ -34,6 +35,7 @@ Execution policy:
 3) If target subgraph not yet reached, use get_subgraph_relationships to select entry node for next subgraph.
 4) Continue until target is reached.
 5) Call dispatch_combiner exactly once at the end.
+6) Use update_plan whenever new information changes the route strategy.
 
 Return concise final text after combiner is done.
 """
@@ -88,6 +90,13 @@ class PathfindingFramework:
         self._last_dispatched_subgraph: Optional[str] = None
         self._last_portal_nodes: List[str] = []
         self._last_combiner_result: Optional[Dict[str, Any]] = None
+        self.progress_memo: List[str] = []
+        self.current_plan: str = ""
+        self.last_result: str = ""
+        self.last_result_turn: int = 0
+        self.current_turn: int = 0
+        self._consecutive_relationship_calls: int = 0
+        self._max_consecutive_relationship_calls: int = 3
 
     def _log(self, message: str) -> None:
         if self.verbose:
@@ -170,6 +179,12 @@ class PathfindingFramework:
         self._last_dispatched_subgraph = None
         self._last_portal_nodes = []
         self._last_combiner_result = None
+        self.progress_memo = []
+        self.current_plan = ""
+        self.last_result = ""
+        self.last_result_turn = 0
+        self.current_turn = 0
+        self._consecutive_relationship_calls = 0
 
     def _auto_priority_subgraph(self, current_subgraph: str, target_subgraph: str) -> Optional[str]:
         if current_subgraph == target_subgraph:
@@ -239,6 +254,20 @@ class PathfindingFramework:
                     "name": "dispatch_combiner",
                     "description": "Combine all worker paths into final path JSON.",
                     "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "update_plan",
+                    "description": "Update current plan text used in next stateless turn.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "plan_text": {"type": "string"},
+                        },
+                        "required": ["plan_text"],
+                    },
                 },
             },
         ]
@@ -358,6 +387,78 @@ class PathfindingFramework:
         )
         return json.dumps(self._last_combiner_result, ensure_ascii=False)
 
+    def _run_update_plan_tool(self, function_args: Dict[str, Any]) -> str:
+        plan_text = str(function_args.get("plan_text", "")).strip()
+        self.current_plan = plan_text
+        return json.dumps({"status": "plan_updated", "plan": plan_text}, ensure_ascii=False)
+
+    def _record_tool_call(self, tool_name: str, params: Dict[str, Any], result: str) -> None:
+        if tool_name == "update_plan":
+            base_call = "update_plan()"
+        else:
+            pairs = [f"{k}={v}" for k, v in params.items() if v is not None]
+            base_call = f"{tool_name}({' '.join(pairs)})"
+
+        status_suffix = ""
+        try:
+            payload = json.loads(result)
+            if isinstance(payload, dict):
+                status = str(payload.get("status", "")).lower()
+                if status in {"failed", "error"}:
+                    status_suffix = " -> FAILED"
+                elif status in {"reached", "complete", "success", "partial"}:
+                    status_suffix = " -> success"
+                elif tool_name == "graph_extract":
+                    status_suffix = " -> success" if payload else " -> empty"
+                elif tool_name == "get_subgraph_relationships":
+                    rels = payload.get("relationships", [])
+                    status_suffix = " -> success" if rels else " -> empty"
+        except Exception:
+            if "error" in result.lower() or "failed" in result.lower():
+                status_suffix = " -> FAILED"
+
+        self.last_result = result
+        self.last_result_turn = self.current_turn
+        memo_line = f"t{self.current_turn}: {base_call}{status_suffix}"
+        self.progress_memo.append(memo_line)
+        self._log(f"[Memo] {memo_line}")
+
+    def _detect_infinite_loop(self, tool_name: str) -> bool:
+        if tool_name == "get_subgraph_relationships":
+            self._consecutive_relationship_calls += 1
+            return self._consecutive_relationship_calls >= self._max_consecutive_relationship_calls
+        self._consecutive_relationship_calls = 0
+        return False
+
+    def _build_turn_prompt(
+        self,
+        *,
+        source: str,
+        target: str,
+        source_subgraph: str,
+        target_subgraph: str,
+    ) -> str:
+        goal = (
+            f"Goal: Find shortest path from '{source}' (sg={source_subgraph}) "
+            f"to '{target}' (sg={target_subgraph})."
+        )
+        if self.progress_memo:
+            memo = "Progress memo:\n  " + "\n  ".join(self.progress_memo)
+        else:
+            memo = "Progress memo: (no actions yet)"
+
+        if self.current_plan:
+            plan = f"Current plan (editable via update_plan):\n  {self.current_plan}"
+        else:
+            plan = "Current plan: (none set yet)"
+
+        if self.last_result:
+            last = f"Last result (from turn {self.last_result_turn}):\n{self.last_result}"
+        else:
+            last = "Last result: (no tool called yet)"
+
+        return f"{goal}\n\n{memo}\n\n{plan}\n\n{last}"
+
     def _execute_tool(
         self,
         *,
@@ -379,6 +480,8 @@ class PathfindingFramework:
             )
         if function_name == "dispatch_combiner":
             return self._run_dispatch_combiner_tool(source=source, target=target)
+        if function_name == "update_plan":
+            return self._run_update_plan_tool(function_args)
         return json.dumps({"error": f"Unknown tool: {function_name}"}, ensure_ascii=False)
 
     def solve(
@@ -413,59 +516,62 @@ class PathfindingFramework:
         self._log(f"Source: {source_name} (Subgraph {source_subgraph})")
         self._log(f"Target: {target_name} (Subgraph {target_subgraph})")
 
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": MASTER_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"Find the shortest path from '{source_name}' to '{target_name}'.\n"
-                    f"Source subgraph: {source_subgraph}\n"
-                    f"Target subgraph: {target_subgraph}\n"
-                    "Start by calling graph_extract on the source subgraph."
-                ),
-            },
-        ]
+        # Pre-turn extract for initial map awareness in stateless mode
+        self.current_turn = 0
+        initial_extract = self._run_graph_extract_tool({"subgraph_id": source_subgraph, "hop": 3})
+        self._record_tool_call(
+            "graph_extract",
+            {"subgraph_id": source_subgraph, "hop": 3},
+            initial_extract,
+        )
 
         final_output_text = ""
+        loop_terminated = False
         for turn in range(1, self.max_turns + 1):
+            self.current_turn = turn
+            user_prompt = self._build_turn_prompt(
+                source=source_name,
+                target=target_name,
+                source_subgraph=source_subgraph,
+                target_subgraph=target_subgraph,
+            )
+
             response = client.chat_completion(
-                messages=messages,
+                messages=[
+                    {"role": "system", "content": MASTER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
                 tools=self._tool_schemas(),
                 tool_choice="auto",
                 temperature=0.0,
             )
             message = response.choices[0].message
+            tool_calls = message.tool_calls or []
 
-            assistant_message: Dict[str, Any] = {
-                "role": "assistant",
-                "content": message.content or "",
-            }
-            if message.tool_calls:
-                assistant_message["tool_calls"] = []
-                for tool_call in message.tool_calls:
-                    assistant_message["tool_calls"].append(
-                        {
-                            "id": tool_call.id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call.function.name,
-                                "arguments": tool_call.function.arguments or "{}",
-                            },
-                        }
-                    )
-            messages.append(assistant_message)
-
-            if not message.tool_calls:
+            if not tool_calls:
                 final_output_text = message.content or ""
                 self._log(f"[Turn {turn}] Master message: {final_output_text[:180]}")
-                continue
+                break
 
-            for tool_call in message.tool_calls:
+            for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 try:
                     function_args = json.loads(tool_call.function.arguments or "{}")
                 except Exception:
                     function_args = {}
+
+                if self._detect_infinite_loop(function_name):
+                    final_output_text = json.dumps(
+                        {
+                            "status": "failed",
+                            "error": "infinite_loop_detected",
+                            "message": "Master repeatedly called get_subgraph_relationships.",
+                        },
+                        ensure_ascii=False,
+                    )
+                    loop_terminated = True
+                    break
+
                 tool_output = self._execute_tool(
                     function_name=function_name,
                     function_args=function_args,
@@ -473,21 +579,14 @@ class PathfindingFramework:
                     target=target_name,
                     target_subgraph=target_subgraph,
                 )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": function_name,
-                        "content": tool_output,
-                    }
-                )
-                if self.verbose:
-                    self._log(f"[Turn {turn}] Tool: {function_name} -> {tool_output[:220]}")
+                self._record_tool_call(function_name, function_args, tool_output)
+                self._log(f"[Turn {turn}] Tool: {function_name} -> {tool_output[:220]}")
 
                 if function_name == "dispatch_combiner":
                     final_output_text = tool_output
                     break
-            if self._last_combiner_result is not None:
+
+            if loop_terminated or self._last_combiner_result is not None:
                 break
 
         combiner_result = self._last_combiner_result or _safe_json_load(final_output_text)
@@ -526,6 +625,9 @@ class PathfindingFramework:
             "strategy": "llm_master_solver_combiner",
             "validation": validation,
             "final_output": final_output_text,
+            "total_turns": self.current_turn,
+            "progress_memo": list(self.progress_memo),
+            "current_plan": self.current_plan,
             "solve_time_seconds": time.perf_counter() - solve_start,
             "token_usage": token_usage,
         }

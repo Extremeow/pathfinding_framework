@@ -7,6 +7,7 @@ Available tools:
 - dispatch_solver: run a local LLM solver in one subgraph.
 - get_subgraph_relationships: get portal transitions from last dispatched subgraph to a target subgraph.
 - dispatch_combiner: combine worker paths into one final path.
+- update_plan: update the persisted plan text for upcoming turns.
 
 Execution policy:
 1) First call graph_extract on the source subgraph.
@@ -14,5 +15,6 @@ Execution policy:
 3) If target subgraph not yet reached, use get_subgraph_relationships to select entry node for next subgraph.
 4) Continue until target is reached.
 5) Call dispatch_combiner exactly once at the end.
+6) Use update_plan whenever new information changes the route strategy.
 
 Return concise final text after combiner is done.
