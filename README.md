@@ -28,11 +28,16 @@ pathfinding_framework/
     solver.py          # LLM solver agent
     combiner.py        # LLM combiner agent
     llm_client.py      # OpenAI client wrapper + usage tracking
+    prompt_loader.py   # Loads prompts/*.txt with fallback
     memory.py          # Metagraph memory store
     partitioning.py    # Leiden/greedy partitioning
     validation.py      # Path validation
     datasets.py        # Dataset loading helpers
     cli.py             # CLI entrypoint
+    prompts/
+      master_prompt.txt
+      solver_prompt.txt
+      combiner_prompt.txt
 ```
 
 ## Install

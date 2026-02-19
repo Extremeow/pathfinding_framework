@@ -6,10 +6,11 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from .llm_client import OpenAIChatClient
 from .memory import GraphMemory
+from .prompt_loader import load_prompt_text
 from .utils import sort_subgraph_ids
 
 
-SOLVER_SYSTEM_PROMPT = """You are a local pathfinding solver.
+DEFAULT_SOLVER_SYSTEM_PROMPT = """You are a local pathfinding solver.
 
 You get one subgraph adjacency list and must output JSON only.
 Do not include markdown fences or extra text.
@@ -28,6 +29,7 @@ Rules:
 - Otherwise find a path to a portal that exits to the requested next subgraph and set status="complete".
 - If no valid path exists, set status="failed" and paths_found=[].
 """
+SOLVER_SYSTEM_PROMPT = load_prompt_text("solver_prompt.txt", DEFAULT_SOLVER_SYSTEM_PROMPT)
 
 
 def _extract_json(text: str) -> Dict[str, Any] | None:

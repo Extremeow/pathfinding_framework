@@ -12,12 +12,13 @@ from .llm_client import DEFAULT_MODEL, OpenAIChatClient
 from .memory import GraphMemory
 from .partitioning import DEFAULT_RESOLUTION, partition_graph
 from .planner import shortest_subgraph_route
+from .prompt_loader import load_prompt_text
 from .solver import run_solver_agent
 from .utils import build_name_graph, sort_subgraph_ids
 from .validation import validate_path
 
 
-MASTER_SYSTEM_PROMPT = """You are the Master agent for hierarchical pathfinding.
+DEFAULT_MASTER_SYSTEM_PROMPT = """You are the Master agent for hierarchical pathfinding.
 
 You must solve by calling tools, not by inventing paths.
 
@@ -36,6 +37,7 @@ Execution policy:
 
 Return concise final text after combiner is done.
 """
+MASTER_SYSTEM_PROMPT = load_prompt_text("master_prompt.txt", DEFAULT_MASTER_SYSTEM_PROMPT)
 
 
 def _safe_json_load(text: str) -> Dict[str, Any]:

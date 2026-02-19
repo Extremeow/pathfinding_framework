@@ -5,9 +5,10 @@ import re
 from typing import Any, Dict, Iterable, List
 
 from .llm_client import OpenAIChatClient
+from .prompt_loader import load_prompt_text
 
 
-COMBINER_SYSTEM_PROMPT = """You are a path combiner agent.
+DEFAULT_COMBINER_SYSTEM_PROMPT = """You are a path combiner agent.
 
 Input is an ordered list of worker dispatch outputs from subgraph solvers.
 Combine them into one final path from source to target.
@@ -25,6 +26,7 @@ Rules:
 - If consecutive segments share a boundary node, avoid duplicating it.
 - Do not invent nodes not present in worker outputs.
 """
+COMBINER_SYSTEM_PROMPT = load_prompt_text("combiner_prompt.txt", DEFAULT_COMBINER_SYSTEM_PROMPT)
 
 
 def _extract_json(text: str) -> Dict[str, Any] | None:
