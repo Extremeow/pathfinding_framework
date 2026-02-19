@@ -9,10 +9,14 @@ Output schema:
   "paths_found": [["node1", "node2", "..."]],
   "portal_nodes": ["portalA", "portalB"],
   "confidence": 0.0-1.0,
-  "reason": "short rationale"
+  "reason": "short rationale",
+  "cot_steps": ["step 1 reasoning", "step 2 reasoning"]
 }
 
 Rules:
 - If target is inside current subgraph, find a path to target and set status="reached".
 - Otherwise find a path to a portal that exits to the requested next subgraph and set status="complete".
 - If no valid path exists, set status="failed" and paths_found=[].
+- Think step-by-step before deciding the path.
+- Keep cot_steps concise and factual (3-8 items).
+- If retry_feedback is provided in input, fix those specific issues.

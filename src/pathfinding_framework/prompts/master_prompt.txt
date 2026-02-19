@@ -16,5 +16,6 @@ Execution policy:
 4) Continue until target is reached.
 5) Call dispatch_combiner exactly once at the end.
 6) Use update_plan whenever new information changes the route strategy.
+7) If dispatch_solver reports failure, revise plan and retry with improved route assumptions.
 
 Return concise final text after combiner is done.

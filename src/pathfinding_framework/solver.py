@@ -21,13 +21,17 @@ Output schema:
   "paths_found": [["node1", "node2", "..."]],
   "portal_nodes": ["portalA", "portalB"],
   "confidence": 0.0-1.0,
-  "reason": "short rationale"
+  "reason": "short rationale",
+  "cot_steps": ["step 1 reasoning", "step 2 reasoning"]
 }
 
 Rules:
 - If target is inside current subgraph, find a path to target and set status="reached".
 - Otherwise find a path to a portal that exits to the requested next subgraph and set status="complete".
 - If no valid path exists, set status="failed" and paths_found=[].
+- Think step-by-step before deciding the path.
+- Keep cot_steps concise and factual (3-8 items).
+- If retry_feedback is provided in input, fix those specific issues.
 """
 SOLVER_SYSTEM_PROMPT = load_prompt_text("solver_prompt.txt", DEFAULT_SOLVER_SYSTEM_PROMPT)
 
@@ -190,6 +194,7 @@ def run_solver_agent(
     source: str,
     target: str,
     priority_subgraph: str | None,
+    retry_feedback: str | None = None,
 ) -> Dict[str, Any]:
     subgraph_key = str(subgraph_id)
     source_name = str(source)
@@ -217,6 +222,7 @@ def run_solver_agent(
         "priority_subgraph": priority,
         "target_in_current_subgraph": target_in_subgraph,
         "adjacency": _serialize_subgraph_adjacency(memory, subgraph_key, priority),
+        "retry_feedback": retry_feedback or "",
     }
     messages = [
         {"role": "system", "content": SOLVER_SYSTEM_PROMPT},
@@ -281,6 +287,9 @@ def run_solver_agent(
         "reason": str(parsed.get("reason", "")).strip(),
         "raw_output": raw_output,
     }
+    cot_steps = parsed.get("cot_steps")
+    if isinstance(cot_steps, list):
+        result["cot_steps"] = [str(x) for x in cot_steps if str(x).strip()][:8]
 
     if priority:
         assignment_status = "complete" if status in {"reached", "complete"} else "failed"

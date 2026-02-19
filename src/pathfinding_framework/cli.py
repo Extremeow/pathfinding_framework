@@ -17,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-key", type=str, help="OpenAI API key (optional if OPENAI_API_KEY is set)")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="OpenAI model for master/solver/combiner")
     parser.add_argument("--max-turns", type=int, default=30, help="Maximum master turns")
+    parser.add_argument("--max-solver-retries", type=int, default=2, help="Retries per solver dispatch")
     parser.add_argument(
         "--partition-method",
         type=str,
@@ -93,6 +94,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         api_key=args.api_key,
         model=args.model,
         max_turns=args.max_turns,
+        max_solver_retries=args.max_solver_retries,
         verbose=not args.quiet,
     )
 

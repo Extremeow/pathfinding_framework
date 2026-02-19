@@ -76,6 +76,7 @@ Useful options:
 
 - `--model gpt-4.1-2025-04-14`
 - `--max-turns 30`
+- `--max-solver-retries 2`
 - `--partition-method auto|leiden|greedy`
 - `--resolution 3.5`
 - `--save-metagraph <path>`
@@ -101,6 +102,7 @@ framework = PathfindingFramework(
     api_key=None,  # uses OPENAI_API_KEY if set
     model="gpt-4.1-2025-04-14",
     max_turns=30,
+    max_solver_retries=2,
     verbose=True,
 )
 framework.initialize_graph(graph, method="auto", resolution=3.5)

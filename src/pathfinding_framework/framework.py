@@ -36,6 +36,7 @@ Execution policy:
 4) Continue until target is reached.
 5) Call dispatch_combiner exactly once at the end.
 6) Use update_plan whenever new information changes the route strategy.
+7) If dispatch_solver reports failure, revise plan and retry with improved route assumptions.
 
 Return concise final text after combiner is done.
 """
@@ -69,11 +70,13 @@ class PathfindingFramework:
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
         max_turns: int = 30,
+        max_solver_retries: int = 2,
         verbose: bool = True,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.max_turns = max_turns
+        self.max_solver_retries = max(0, int(max_solver_retries))
         self.verbose = verbose
 
         self.graph_memory = GraphMemory()
@@ -312,6 +315,18 @@ class PathfindingFramework:
             ensure_ascii=False,
         )
 
+    def _build_solver_retry_feedback(self, solver_result: Dict[str, Any]) -> str:
+        error = str(solver_result.get("error", "") or "").strip()
+        raw = str(solver_result.get("raw_output", "") or "").strip()
+        if error:
+            return f"Previous attempt failed: {error}. Re-check edges and target/portal constraints."
+        if raw:
+            return (
+                "Previous attempt produced invalid or unusable output. "
+                "Return strict JSON and verify every edge exists in adjacency."
+            )
+        return "Previous attempt failed. Re-evaluate path with step-by-step reasoning."
+
     def _run_dispatch_solver_tool(
         self,
         *,
@@ -330,14 +345,39 @@ class PathfindingFramework:
 
         self._dispatch_count += 1
         client = self._ensure_client()
-        solver_result = run_solver_agent(
-            client=client,
-            memory=self.graph_memory,
-            subgraph_id=subgraph_id,
-            source=source,
-            target=target,
-            priority_subgraph=priority_subgraph,
-        )
+        solver_result: Dict[str, Any] = {}
+        retry_feedback: str | None = None
+        attempt_history: List[Dict[str, Any]] = []
+        max_attempts = self.max_solver_retries + 1
+
+        for attempt in range(1, max_attempts + 1):
+            solver_result = run_solver_agent(
+                client=client,
+                memory=self.graph_memory,
+                subgraph_id=subgraph_id,
+                source=source,
+                target=target,
+                priority_subgraph=priority_subgraph,
+                retry_feedback=retry_feedback,
+            )
+            status = str(solver_result.get("status", "failed")).lower()
+            invalid = status == "failed"
+            attempt_history.append(
+                {
+                    "attempt": attempt,
+                    "status": status,
+                    "error": solver_result.get("error", ""),
+                }
+            )
+            if not invalid:
+                break
+            if attempt < max_attempts:
+                retry_feedback = self._build_solver_retry_feedback(solver_result)
+
+        final_attempt = attempt_history[-1]["attempt"] if attempt_history else 0
+        solver_result["solver_retry_attempts"] = final_attempt
+        solver_result["solver_retry_limit"] = self.max_solver_retries
+        solver_result["solver_retry_history"] = attempt_history
 
         record = {
             "dispatch_id": self._dispatch_count,
@@ -374,6 +414,8 @@ class PathfindingFramework:
             "reached_target_subgraph": reached_target_subgraph,
             "assignment": solver_result.get("assignment"),
             "error": solver_result.get("error"),
+            "solver_retry_attempts": solver_result.get("solver_retry_attempts", 1),
+            "solver_retry_limit": solver_result.get("solver_retry_limit", self.max_solver_retries),
         }
         return json.dumps(tool_result, ensure_ascii=False)
 
